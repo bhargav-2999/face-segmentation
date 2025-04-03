@@ -59,7 +59,8 @@ def main():
         image_bgr = cv2.imdecode(file_bytes, 1)
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
-        st.image(image_rgb, caption="Uploaded Image", use_column_width=True)
+        st.image(image_rgb, caption="Uploaded Image", use_container_width=True)
+
 
         if not detect_single_face(image_rgb):
             st.error("Please upload an image with **exactly ONE face**.")
