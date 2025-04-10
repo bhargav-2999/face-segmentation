@@ -445,8 +445,6 @@
 
 
 
-
-
 import sys
 import cv2
 import numpy as np
@@ -457,6 +455,9 @@ import os
 import gdown
 from model import BiSeNet
 
+# Disable Streamlit watchdog warning if using Streamlit
+os.environ["STREAMLIT_DISABLE_WATCHDOG_WARNINGS"] = "true"
+
 # MediaPipe models
 mp_face_mesh = mp.solutions.face_mesh
 mp_face_detection = mp.solutions.face_detection
@@ -464,7 +465,7 @@ mp_face_detection = mp.solutions.face_detection
 def detect_single_face(image_rgb):
     with mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5) as face_detection:
         results = face_detection.process(image_rgb)
-        return (results.detections and len(results.detections) == 1)
+        return results.detections is not None and len(results.detections) == 1
 
 def load_bisenet_model(weight_path='79999_iter.pth', n_classes=19):
     if not os.path.exists(weight_path):
@@ -475,7 +476,7 @@ def load_bisenet_model(weight_path='79999_iter.pth', n_classes=19):
             quiet=False
         )
     net = BiSeNet(n_classes=n_classes)
-    net.load_state_dict(torch.load(weight_path, map_location='cpu'))
+    net.load_state_dict(torch.load(weight_path, map_location=torch.device('cpu')))
     net.eval()
     return net
 
@@ -518,8 +519,7 @@ def parse_image(image_bgr, model):
     with torch.no_grad():
         outputs = model(tensor)
         main_output = outputs[0] if isinstance(outputs, (tuple, list)) else outputs
-        main_output = main_output.squeeze(0)
-        parsing_map = torch.argmax(main_output, dim=0).cpu().numpy()
+        parsing_map = torch.argmax(main_output.squeeze(0), dim=0).cpu().numpy()
 
     return parsing_map, orig_h, orig_w
 
@@ -550,9 +550,8 @@ def create_rgba_image(original_bgr, mask):
 def feather_alpha(rgba, radius=5, iterations=1):
     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
     alpha = cv2.GaussianBlur(alpha, (2 * radius + 1, 2 * radius + 1), radius)
-    alpha = np.clip(alpha, 0, 1)
-    rgba[:, :, 3] = (alpha * 255).astype(np.uint8)
-    return rgba
+    rgba[:, :, 3] = np.clip(alpha, 0, 1) * 255
+    return rgba.astype(np.uint8)
 
 def make_glasses_see_through(rgba_image, left_eye_box, right_eye_box):
     return rgba_image
@@ -563,12 +562,8 @@ def crop_to_alpha(rgba, padding=10):
     if coords is None:
         return rgba
     x, y, w, h = cv2.boundingRect(coords)
-    y_start = max(0, y - padding)
-    x_start = max(0, x - padding)
-    y_end = min(rgba.shape[0], y + h + padding)
-    x_end = min(rgba.shape[1], x + w + padding)
-    cropped = rgba[y_start:y_end, x_start:x_end]
-    return cropped
+    return rgba[max(0, y - padding):min(rgba.shape[0], y + h + padding),
+                max(0, x - padding):min(rgba.shape[1], x + w + padding)]
 
 def detect_eye_boxes(image_rgb):
     with mp_face_mesh.FaceMesh(static_image_mode=True) as face_mesh:
@@ -584,10 +579,7 @@ def detect_eye_boxes(image_rgb):
             ys = [int(landmarks[i].y * h) for i in indices]
             return (min(xs) - 15, min(ys) - 15, max(xs) + 15, max(ys) + 15)
 
-        left_eye_indices = list(range(33, 42))
-        right_eye_indices = list(range(263, 272))
-
-        return get_box(left_eye_indices), get_box(right_eye_indices)
+        return get_box(range(33, 42)), get_box(range(263, 272))
 
 def process_image(image_bgr):
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
@@ -635,6 +627,5 @@ if __name__ == "__main__":
         print("Saved segmented image to segmented_face.png")
     except ValueError as e:
         print(f"Error: {e}")
-
 
 
